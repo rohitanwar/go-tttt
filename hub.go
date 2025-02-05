@@ -25,6 +25,13 @@ type Hub struct {
 
 	// Unregister requests from clients.
 	unregister chan *Client
+
+	reconnect chan ReconnectRequest
+}
+
+type ReconnectRequest struct {
+	uuid   string
+	client *Client
 }
 
 func (h *Hub) findEmptyGame() int {
@@ -46,6 +53,7 @@ func newHub() *Hub {
 		broadcast:  make(chan []byte),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		reconnect:  make(chan ReconnectRequest),
 		games:      games,
 		//clients:    make(map[*Client]int),
 	}
@@ -68,6 +76,25 @@ func (h *Hub) run() {
 				case client.send <- []byte("connected " + strconv.Itoa(gameId) + " " + strconv.Itoa(client.player)):
 				default:
 					close(client.send)
+				}
+			}
+		case req := <-h.reconnect:
+			{
+				client := req.client
+				client.gameId = req.client.gameId
+				if h.games[client.gameId].playerX.uuid == req.uuid || h.games[client.gameId].playerY.uuid == req.uuid {
+					h.games[client.gameId].registerPlayer(client)
+					select {
+					case client.send <- []byte("reconnected " + strconv.Itoa(client.gameId) + " " + strconv.Itoa(client.player)):
+					default:
+						close(client.send)
+					}
+				} else {
+					select {
+					case client.send <- []byte("reconnect failed"):
+					default:
+						close(client.send)
+					}
 				}
 			}
 		}

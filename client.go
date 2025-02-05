@@ -42,11 +42,11 @@ var upgrader = websocket.Upgrader{
 type Client struct {
 	hub *Hub
 
-	gameId int
-	// The websocket connection.
 	conn *websocket.Conn
 
+	gameId int
 	player int
+	uuid   string
 
 	// Buffered channel of outbound messages.
 	send chan []byte
@@ -78,15 +78,32 @@ func (c *Client) readPump() {
 		switch string(before) {
 		case "connect":
 			{
+				c.uuid = string(after)
 				fmt.Println(string(message))
 				if c.gameId == -1 {
 					c.hub.register <- c
 				}
 			}
+		case "reconnect":
+			{
+				uuid := string(after)
+				fmt.Println(string(message))
+				c.hub.reconnect <- ReconnectRequest{uuid, c}
+			}
+		case "auth":
+			{
+				token := string(after)
+				userID, err := validateJWT(token)
+
+				if err == nil {
+					c.uuid = userID
+				}
+			}
 		case "move":
 			{
-				c.hub.games[c.gameId].makeMove(Player(c.player), 0, 0)
-				fmt.Println(string(after))
+				var globalIndex, localIndex int
+				fmt.Sscanf(string(after), "%d %d", &globalIndex, &localIndex)
+				c.hub.games[c.gameId].makeMove(Player(c.player), globalIndex, localIndex)
 			}
 		default:
 			select {
@@ -124,9 +141,6 @@ func (c *Client) writePump() {
 				return
 			}
 			w.Write(message)
-
-			// Debug Line
-			// fmt.Println(message)
 
 			// Add queued chat messages to the current websocket message.
 			n := len(c.send)
